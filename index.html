@@ -32,8 +32,8 @@
   </div>
 
   <script>
-    // ▼ あなたのGASのURL（設定済みです！） ▼
-    const GAS_URL = "https://script.google.com/macros/s/AKfycbzgGjGsR7_lT48L5oQsWnly3BS0iIgL8jElHTmmGO7MrgVAIph4EmUT4EM_tS_hT2rpDg/exec";
+    // ▼ さっきのGASのURLをここに貼り付ける ▼
+    const GAS_URL = "【ここにGASのURLを貼り付ける】";
     
     let html5QrCode = null;
     let selectedMode = "";
@@ -55,7 +55,7 @@
       
       html5QrCode.start({ facingMode: "environment" }, { fps: 10, qrbox: 250 }, onScanSuccess)
         .then(() => { 
-          document.getElementById('msg').innerText = "QRコードをかざしてください";
+          document.getElementById('msg').innerText = "QRを連続でかざしてください";
           document.getElementById('msg').style.color = "#333";
         })
         .catch((err) => { 
@@ -81,23 +81,31 @@
       recentlyScanned = []; // メモ帳もリセット
     }
 
-    // ▼ スキャンした瞬間の動き ▼
+    // ▼ ここが爆速スキャンの心臓部 ▼
     function onScanSuccess(decodedText) {
       // 1. もし「ついさっき読んだばかりのQR」なら、無視して次へ（カメラは止まらない）
       if (recentlyScanned.includes(decodedText)) return;
 
-      // 2. 新しいQRなら、メモ帳に記録して「5秒後」に消去する
+      // 2. 新しいQRなら、メモ帳に記録して「5秒後」に消去する（5秒間は二重送信されない）
       recentlyScanned.push(decodedText);
       setTimeout(() => {
         recentlyScanned = recentlyScanned.filter(item => item !== decodedText);
       }, 5000);
 
-      // 3. まず画面を「通信中」に切り替える（次の人が来るまで消えない）
+      // 3. カメラを止めずに、画面の表示だけ一瞬で「受付！」に変える
       const msgDiv = document.getElementById('msg');
-      msgDiv.innerText = "🔄 通信中: " + decodedText;
-      msgDiv.style.color = "#007bff";
+      msgDiv.innerText = "✅ スキャン完了: " + decodedText;
+      msgDiv.style.color = "#28a745";
+      
+      // 0.5秒後に表示を元に戻す（次々と読み込んでいる感が出る）
+      setTimeout(() => {
+        if(msgDiv.innerText.includes(decodedText)) {
+          msgDiv.innerText = "次のQRをかざしてください";
+          msgDiv.style.color = "#333";
+        }
+      }, 500);
 
-      // 4. 裏側でGASに送信
+      // 4. 裏側でこっそりGASに送信する（待たなくてOK！）
       if (selectedMode === 'outside') {
         sendToGasInBackground(decodedText);
       } else {
@@ -125,7 +133,7 @@
       );
     }
 
-    // ▼ GASから結果をもらって画面に表示し続ける処理 ▼
+    // ▼ 待たずに裏側で送信する処理 ▼
     function sendToGasInBackground(decodedText) {
       fetch(GAS_URL, {
         method: 'POST',
@@ -134,22 +142,10 @@
       })
       .then(response => response.text())
       .then(res => {
-        // GASから返ってきた言葉（「出席」や「遅刻」など）を画面にドカンと表示する！
-        const msgDiv = document.getElementById('msg');
-        msgDiv.innerText = res;
-        
-        // GASの返事に「遅刻」が含まれていたらオレンジ、「エラー」なら赤、それ以外は緑にする
-        if (res.includes("遅刻")) {
-          msgDiv.style.color = "#fd7e14"; // オレンジ
-        } else if (res.includes("❌") || res.includes("エラー")) {
-          msgDiv.style.color = "#d9534f"; // 赤
-        } else {
-          msgDiv.style.color = "#28a745"; // 緑
-        }
+        console.log("GAS送信成功:", res);
       })
       .catch(err => {
-        document.getElementById('msg').innerText = "❌ 通信エラーが発生しました";
-        document.getElementById('msg').style.color = "red";
+        console.error("GAS通信エラー:", err);
       });
     }
 
