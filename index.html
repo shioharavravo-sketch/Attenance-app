@@ -114,9 +114,9 @@
         recentlyScanned = recentlyScanned.filter(item => item !== decodedText);
       }, 5000);
 
-      // 一旦画面を「通信中」にする
+      // 一旦画面を「通信中」にする（※IDなどは表示しない！）
       const msgDiv = document.getElementById('msg');
-      msgDiv.innerText = "🔄 通信中: " + decodedText;
+      msgDiv.innerText = "🔄 通信中...";
       msgDiv.style.color = "#007bff"; // 青色
 
       // GASへデータを送信
