@@ -39,12 +39,17 @@
     let selectedMode = "";
     let recentlyScanned = []; 
     
+    // GPS監視用の変数
+    let watchId = null;
+    let latestLat = null;
+    let latestLng = null;
+    let isCameraStarted = false;
+    
     // 大学の座標設定
     const UNIV_LAT = 34.743429; 
     const UNIV_LNG = 137.388910; 
     const ALLOWED_RADIUS = 500;
 
-    // ▼ ボタンを押した時の処理（ここで1回だけGPSをチェックする）
     function selectMode(mode) {
       selectedMode = mode;
       document.getElementById('setup').style.display = 'none';
@@ -52,28 +57,40 @@
       
       if (mode === 'univ') {
         document.getElementById('msg').innerText = "📍 位置情報を確認中...";
-        navigator.geolocation.getCurrentPosition(
+        
+        // ▼ 変更点：GPSを裏側で「常に」監視し続ける ▼
+        watchId = navigator.geolocation.watchPosition(
           (pos) => {
-            const dist = getDistance(pos.coords.latitude, pos.coords.longitude, UNIV_LAT, UNIV_LNG);
-            if (dist <= ALLOWED_RADIUS) {
-              startCamera(); 
-            } else {
-              document.getElementById('msg').innerText = `❌ 範囲外です (${Math.round(dist)}m)`;
-              document.getElementById('msg').style.color = "red";
+            // 常に最新の座標をアップデート
+            latestLat = pos.coords.latitude;
+            latestLng = pos.coords.longitude;
+            const dist = getDistance(latestLat, latestLng, UNIV_LAT, UNIV_LNG);
+
+            // まだカメラが起動していない（初回）の場合のみチェックして起動
+            if (!isCameraStarted) {
+              if (dist <= ALLOWED_RADIUS) {
+                isCameraStarted = true;
+                startCamera(); 
+              } else {
+                document.getElementById('msg').innerText = `❌ 範囲外です (${Math.round(dist)}m)`;
+                document.getElementById('msg').style.color = "red";
+              }
             }
           },
           () => { 
-            document.getElementById('msg').innerText = "❌ 位置情報を許可してください";
-            document.getElementById('msg').style.color = "red";
+            if (!isCameraStarted) {
+              document.getElementById('msg').innerText = "❌ 位置情報を許可してください";
+              document.getElementById('msg').style.color = "red";
+            }
           },
-          { enableHighAccuracy: true, timeout: 10000 }
+          { enableHighAccuracy: true, maximumAge: 5000, timeout: 5000 }
         );
       } else {
+        isCameraStarted = true;
         startCamera(); 
       }
     }
 
-    // カメラを起動する処理
     function startCamera() {
       html5QrCode = new Html5Qrcode("reader");
       html5QrCode.start({ facingMode: "environment" }, { fps: 10, qrbox: 250 }, onScanSuccess)
@@ -88,6 +105,13 @@
     }
 
     function resetPage() {
+      // 監視もストップする
+      if (watchId !== null) {
+        navigator.geolocation.clearWatch(watchId);
+        watchId = null;
+      }
+      isCameraStarted = false;
+
       if (html5QrCode && html5QrCode.isScanning) {
         html5QrCode.stop().then(finalizeReset).catch(finalizeReset);
       } else {
@@ -104,26 +128,41 @@
       recentlyScanned = []; 
     }
 
-    // ▼ スキャンした瞬間の動き ▼
     function onScanSuccess(decodedText) {
-      // 直前に読んだQRなら無視（二重送信防止）
       if (recentlyScanned.includes(decodedText)) return;
+
+      // ▼ 変更点：スキャンした瞬間に「最新の監視データ」を見て、持ち出されていないか判定 ▼
+      if (selectedMode === 'univ' && latestLat !== null) {
+        const dist = getDistance(latestLat, latestLng, UNIV_LAT, UNIV_LNG);
+        if (dist > ALLOWED_RADIUS) {
+          // 範囲外なら送信せずにエラー表示！
+          const msgDiv = document.getElementById('msg');
+          msgDiv.innerText = `❌ 持ち出しを検知しました (${Math.round(dist)}m)`;
+          msgDiv.style.color = "red";
+          
+          // 2秒後に元の表示に戻す
+          setTimeout(() => {
+            if (msgDiv.innerText.includes("持ち出し")) {
+              msgDiv.innerText = "次のQRをかざしてください";
+              msgDiv.style.color = "#333";
+            }
+          }, 2000);
+          return; // ここで処理を止める（GASには送らない）
+        }
+      }
 
       recentlyScanned.push(decodedText);
       setTimeout(() => {
         recentlyScanned = recentlyScanned.filter(item => item !== decodedText);
       }, 5000);
 
-      // 一旦画面を「通信中」にする（※IDなどは表示しない！）
       const msgDiv = document.getElementById('msg');
       msgDiv.innerText = "🔄 通信中...";
-      msgDiv.style.color = "#007bff"; // 青色
+      msgDiv.style.color = "#007bff"; 
 
-      // GASへデータを送信
       sendToGasInBackground(decodedText);
     }
 
-    // ▼ GASへ送信し、結果を1秒間表示する処理 ▼
     function sendToGasInBackground(decodedText) {
       fetch(GAS_URL, {
         method: 'POST',
@@ -133,10 +172,8 @@
       .then(response => response.text())
       .then(res => {
         const msgDiv = document.getElementById('msg');
-        // GASからの返事（「出席」や「遅刻」など）を画面に表示！
         msgDiv.innerText = res;
         
-        // 結果に応じて色を変える（遅刻はオレンジ、エラーは赤、それ以外は緑）
         if (res.includes("遅刻")) {
           msgDiv.style.color = "#fd7e14"; 
         } else if (res.includes("❌") || res.includes("エラー")) {
@@ -145,9 +182,7 @@
           msgDiv.style.color = "#28a745"; 
         }
 
-        // ⏱️ 1秒（1000ミリ秒）後に「次のQRをかざしてください」に戻す
         setTimeout(() => {
-          // もしすでに次の人がスキャンしていなければ、画面をリセットする
           if (msgDiv.innerText === res) {
             msgDiv.innerText = "次のQRをかざしてください";
             msgDiv.style.color = "#333";
@@ -159,7 +194,6 @@
         msgDiv.innerText = "❌ 通信エラーが発生しました";
         msgDiv.style.color = "red";
         
-        // エラーの時も1秒後に戻す
         setTimeout(() => {
           if (msgDiv.innerText.includes("エラー")) {
             msgDiv.innerText = "次のQRをかざしてください";
