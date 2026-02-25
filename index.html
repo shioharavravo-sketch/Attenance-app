@@ -1,4 +1,38 @@
-    // ▼ さっきコピーしたGASのURLをここに貼り付ける ▼
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>出席管理スキャン</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
+  <style>
+    body { font-family: sans-serif; text-align: center; margin: 0; background: #f8f9fa; color: #333; }
+    .header { background: #007bff; color: white; padding: 15px; font-weight: bold; font-size: 1.2rem; }
+    #reader { width: 95%; max-width: 400px; margin: 10px auto; background: white; border-radius: 8px; overflow: hidden; min-height: 250px; }
+    #msg { font-size: 1.1rem; font-weight: bold; padding: 20px; min-height: 60px; line-height: 1.5; word-wrap: break-word; }
+    .btn-container { padding-top: 50px; }
+    .btn { display: block; width: 80%; max-width: 300px; margin: 20px auto; padding: 20px; font-size: 1.2rem; border: none; border-radius: 15px; cursor: pointer; color: white; font-weight: bold; }
+    .btn-univ { background: #28a745; }
+    .btn-outside { background: #fd7e14; }
+    .btn-retry { background: #6c757d; color: white; padding: 10px 20px; border-radius: 8px; border: none; margin-top: 15px; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <div class="header">出席管理スキャン</div>
+  
+  <div id="setup" class="btn-container">
+    <button class="btn btn-univ" onclick="selectMode('univ')">🏫 大学内</button>
+    <button class="btn btn-outside" onclick="selectMode('outside')">🏃 大学外</button>
+  </div>
+
+  <div id="scan-container" style="display:none;">
+    <div id="msg">カメラ準備中...</div>
+    <div id="reader"></div>
+    <button class="btn-retry" onclick="resetPage()">↺ 最初に戻る</button>
+  </div>
+
+  <script>
+    // ▼ さっきのGASのURLをここに貼り付ける ▼
     const GAS_URL = "https://script.google.com/macros/s/AKfycbzgGjGsR7_lT48L5oQsWnly3BS0iIgL8jElHTmmGO7MrgVAIph4EmUT4EM_tS_hT2rpDg/exec";
     
     let html5QrCode = null;
@@ -108,7 +142,6 @@
       })
       .then(response => response.text())
       .then(res => {
-        // 裏側で成功したらコンソール（裏画面）に記録するだけ。画面は止めない。
         console.log("GAS送信成功:", res);
       })
       .catch(err => {
@@ -123,3 +156,6 @@
       const a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLng/2)**2;
       return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     }
+  </script>
+</body>
+</html>
