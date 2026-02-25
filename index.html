@@ -55,7 +55,7 @@
       
       html5QrCode.start({ facingMode: "environment" }, { fps: 10, qrbox: 250 }, onScanSuccess)
         .then(() => { 
-          document.getElementById('msg').innerText = "QRを連続でかざしてください";
+          document.getElementById('msg').innerText = "QRコードをかざしてください";
           document.getElementById('msg').style.color = "#333";
         })
         .catch((err) => { 
