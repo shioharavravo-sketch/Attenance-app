@@ -32,13 +32,11 @@
   </div>
 
   <script>
-    // ▼ さっきのGASのURLをここに貼り付ける ▼
-    const GAS_URL = "【ここにGASのURLを貼り付ける】";
+    // あなたのGAS URL
+    const GAS_URL = "https://script.google.com/macros/s/AKfycbzgGjGsR7_lT48L5oQsWnly3BS0iIgL8jElHTmmGO7MrgVAIph4EmUT4EM_tS_hT2rpDg/exec";
     
     let html5QrCode = null;
     let selectedMode = "";
-    
-    // 二重読み込み防止用のメモ帳（数秒間だけ記憶する）
     let recentlyScanned = []; 
     
     // 大学の座標設定
@@ -46,13 +44,38 @@
     const UNIV_LNG = 137.388910; 
     const ALLOWED_RADIUS = 500;
 
+    // ▼ ボタンを押した時の処理（ここで1回だけGPSをチェックする）
     function selectMode(mode) {
       selectedMode = mode;
       document.getElementById('setup').style.display = 'none';
       document.getElementById('scan-container').style.display = 'block';
       
+      if (mode === 'univ') {
+        document.getElementById('msg').innerText = "📍 位置情報を確認中...";
+        navigator.geolocation.getCurrentPosition(
+          (pos) => {
+            const dist = getDistance(pos.coords.latitude, pos.coords.longitude, UNIV_LAT, UNIV_LNG);
+            if (dist <= ALLOWED_RADIUS) {
+              startCamera(); // 距離OKならカメラ起動
+            } else {
+              document.getElementById('msg').innerText = `❌ 範囲外です (${Math.round(dist)}m)`;
+              document.getElementById('msg').style.color = "red";
+            }
+          },
+          () => { 
+            document.getElementById('msg').innerText = "❌ 位置情報を許可してください";
+            document.getElementById('msg').style.color = "red";
+          },
+          { enableHighAccuracy: true, timeout: 10000 }
+        );
+      } else {
+        startCamera(); // 大学外なら即カメラ起動
+      }
+    }
+
+    // カメラを起動する処理
+    function startCamera() {
       html5QrCode = new Html5Qrcode("reader");
-      
       html5QrCode.start({ facingMode: "environment" }, { fps: 10, qrbox: 250 }, onScanSuccess)
         .then(() => { 
           document.getElementById('msg').innerText = "QRを連続でかざしてください";
@@ -78,26 +101,22 @@
       document.getElementById('msg').innerText = "カメラ準備中...";
       document.getElementById('msg').style.color = "#333";
       selectedMode = "";
-      recentlyScanned = []; // メモ帳もリセット
+      recentlyScanned = []; 
     }
 
-    // ▼ ここが爆速スキャンの心臓部 ▼
+    // ▼ スキャンした瞬間の動き（毎回GPSを測らないので一瞬で終わる！）
     function onScanSuccess(decodedText) {
-      // 1. もし「ついさっき読んだばかりのQR」なら、無視して次へ（カメラは止まらない）
       if (recentlyScanned.includes(decodedText)) return;
 
-      // 2. 新しいQRなら、メモ帳に記録して「5秒後」に消去する（5秒間は二重送信されない）
       recentlyScanned.push(decodedText);
       setTimeout(() => {
         recentlyScanned = recentlyScanned.filter(item => item !== decodedText);
       }, 5000);
 
-      // 3. カメラを止めずに、画面の表示だけ一瞬で「受付！」に変える
       const msgDiv = document.getElementById('msg');
       msgDiv.innerText = "✅ スキャン完了: " + decodedText;
       msgDiv.style.color = "#28a745";
       
-      // 0.5秒後に表示を元に戻す（次々と読み込んでいる感が出る）
       setTimeout(() => {
         if(msgDiv.innerText.includes(decodedText)) {
           msgDiv.innerText = "次のQRをかざしてください";
@@ -105,35 +124,10 @@
         }
       }, 500);
 
-      // 4. 裏側でこっそりGASに送信する（待たなくてOK！）
-      if (selectedMode === 'outside') {
-        sendToGasInBackground(decodedText);
-      } else {
-        checkLocationInBackground(decodedText);
-      }
+      // GPSチェックはもう済んでいるので、待たずに直接GASへ送信！
+      sendToGasInBackground(decodedText);
     }
 
-    function checkLocationInBackground(decodedText) {
-      navigator.geolocation.getCurrentPosition(
-        (pos) => {
-          const dist = getDistance(pos.coords.latitude, pos.coords.longitude, UNIV_LAT, UNIV_LNG);
-          if (dist <= ALLOWED_RADIUS) {
-            sendToGasInBackground(decodedText);
-          } else {
-            // エラーの時だけ画面に警告を出す
-            document.getElementById('msg').innerText = `❌ 範囲外です (${Math.round(dist)}m)`;
-            document.getElementById('msg').style.color = "red";
-          }
-        },
-        () => { 
-          document.getElementById('msg').innerText = "❌ 位置情報を許可してください";
-          document.getElementById('msg').style.color = "red";
-        },
-        { enableHighAccuracy: true, timeout: 5000 }
-      );
-    }
-
-    // ▼ 待たずに裏側で送信する処理 ▼
     function sendToGasInBackground(decodedText) {
       fetch(GAS_URL, {
         method: 'POST',
@@ -141,12 +135,8 @@
         body: JSON.stringify({ qrData: decodedText, mode: selectedMode })
       })
       .then(response => response.text())
-      .then(res => {
-        console.log("GAS送信成功:", res);
-      })
-      .catch(err => {
-        console.error("GAS通信エラー:", err);
-      });
+      .then(res => console.log("GAS送信成功:", res))
+      .catch(err => console.error("GAS通信エラー:", err));
     }
 
     function getDistance(lat1, lng1, lat2, lng2) {
