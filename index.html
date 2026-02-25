@@ -56,7 +56,7 @@
           (pos) => {
             const dist = getDistance(pos.coords.latitude, pos.coords.longitude, UNIV_LAT, UNIV_LNG);
             if (dist <= ALLOWED_RADIUS) {
-              startCamera(); // 距離OKならカメラ起動
+              startCamera(); 
             } else {
               document.getElementById('msg').innerText = `❌ 範囲外です (${Math.round(dist)}m)`;
               document.getElementById('msg').style.color = "red";
@@ -69,7 +69,7 @@
           { enableHighAccuracy: true, timeout: 10000 }
         );
       } else {
-        startCamera(); // 大学外なら即カメラ起動
+        startCamera(); 
       }
     }
 
@@ -78,7 +78,7 @@
       html5QrCode = new Html5Qrcode("reader");
       html5QrCode.start({ facingMode: "environment" }, { fps: 10, qrbox: 250 }, onScanSuccess)
         .then(() => { 
-          document.getElementById('msg').innerText = "QRを連続でかざしてください";
+          document.getElementById('msg').innerText = "QRをかざしてください";
           document.getElementById('msg').style.color = "#333";
         })
         .catch((err) => { 
@@ -104,8 +104,9 @@
       recentlyScanned = []; 
     }
 
-    // ▼ スキャンした瞬間の動き（毎回GPSを測らないので一瞬で終わる！）
+    // ▼ スキャンした瞬間の動き ▼
     function onScanSuccess(decodedText) {
+      // 直前に読んだQRなら無視（二重送信防止）
       if (recentlyScanned.includes(decodedText)) return;
 
       recentlyScanned.push(decodedText);
@@ -113,21 +114,16 @@
         recentlyScanned = recentlyScanned.filter(item => item !== decodedText);
       }, 5000);
 
+      // 一旦画面を「通信中」にする
       const msgDiv = document.getElementById('msg');
-      msgDiv.innerText = "✅ スキャン完了: " + decodedText;
-      msgDiv.style.color = "#28a745";
-      
-      setTimeout(() => {
-        if(msgDiv.innerText.includes(decodedText)) {
-          msgDiv.innerText = "次のQRをかざしてください";
-          msgDiv.style.color = "#333";
-        }
-      }, 500);
+      msgDiv.innerText = "🔄 通信中: " + decodedText;
+      msgDiv.style.color = "#007bff"; // 青色
 
-      // GPSチェックはもう済んでいるので、待たずに直接GASへ送信！
+      // GASへデータを送信
       sendToGasInBackground(decodedText);
     }
 
+    // ▼ GASへ送信し、結果を1秒間表示する処理 ▼
     function sendToGasInBackground(decodedText) {
       fetch(GAS_URL, {
         method: 'POST',
@@ -135,8 +131,42 @@
         body: JSON.stringify({ qrData: decodedText, mode: selectedMode })
       })
       .then(response => response.text())
-      .then(res => console.log("GAS送信成功:", res))
-      .catch(err => console.error("GAS通信エラー:", err));
+      .then(res => {
+        const msgDiv = document.getElementById('msg');
+        // GASからの返事（「出席」や「遅刻」など）を画面に表示！
+        msgDiv.innerText = res;
+        
+        // 結果に応じて色を変える（遅刻はオレンジ、エラーは赤、それ以外は緑）
+        if (res.includes("遅刻")) {
+          msgDiv.style.color = "#fd7e14"; 
+        } else if (res.includes("❌") || res.includes("エラー")) {
+          msgDiv.style.color = "#d9534f"; 
+        } else {
+          msgDiv.style.color = "#28a745"; 
+        }
+
+        // ⏱️ 1秒（1000ミリ秒）後に「次のQRをかざしてください」に戻す
+        setTimeout(() => {
+          // もしすでに次の人がスキャンしていなければ、画面をリセットする
+          if (msgDiv.innerText === res) {
+            msgDiv.innerText = "次のQRをかざしてください";
+            msgDiv.style.color = "#333";
+          }
+        }, 1000);
+      })
+      .catch(err => {
+        const msgDiv = document.getElementById('msg');
+        msgDiv.innerText = "❌ 通信エラーが発生しました";
+        msgDiv.style.color = "red";
+        
+        // エラーの時も1秒後に戻す
+        setTimeout(() => {
+          if (msgDiv.innerText.includes("エラー")) {
+            msgDiv.innerText = "次のQRをかざしてください";
+            msgDiv.style.color = "#333";
+          }
+        }, 1000);
+      });
     }
 
     function getDistance(lat1, lng1, lat2, lng2) {
