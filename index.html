@@ -95,7 +95,8 @@
 
     function startCamera() {
       html5QrCode = new Html5Qrcode("reader");
-      html5QrCode.start({ facingMode: "environment" }, { fps: 10, qrbox: 250 }, onScanSuccess)
+      // 【変更点1】fpsを10から30に上げて、QRの認識速度をアップ
+      html5QrCode.start({ facingMode: "environment" }, { fps: 30, qrbox: 250 }, onScanSuccess)
         .then(() => { 
           document.getElementById('msg').innerText = "QRをかざしてください";
           document.getElementById('msg').style.color = "#333";
@@ -112,7 +113,7 @@
         watchId = null;
       }
       isCameraStarted = false;
-      isProcessing = false; // ロック解除
+      isProcessing = false;
 
       if (html5QrCode && html5QrCode.isScanning) {
         html5QrCode.stop().then(finalizeReset).catch(finalizeReset);
@@ -132,7 +133,7 @@
     }
 
     function onScanSuccess(decodedText) {
-      // ★ ロック中（通信中）ならスキャンを無視
+      // ロック中ならスキャンを無視（安全対策キープ）
       if (isProcessing) return; 
 
       if (recentlyScanned.includes(decodedText)) return;
@@ -154,11 +155,11 @@
         }
       }
 
-      // ★ 通信開始：フラグをONにし、カメラを一時停止
+      // 通信開始：フラグをONにし、カメラを一時停止
       isProcessing = true;
       if (html5QrCode && html5QrCode.getState() === 2) {
         html5QrCode.pause(); 
-        document.getElementById('reader').classList.add('paused'); // 画面を少し暗くする
+        document.getElementById('reader').classList.add('paused');
       }
 
       recentlyScanned.push(decodedText);
@@ -192,31 +193,31 @@
           msgDiv.style.color = "#28a745"; 
         }
 
-        // 1秒後に次のスキャンを許可
+        // 【変更点2】結果表示後の待ち時間を1000msから300msに短縮し、テンポアップ！
         setTimeout(() => {
           resumeCamera(msgDiv, res);
-        }, 1000);
+        }, 300);
       })
       .catch(err => {
         const msgDiv = document.getElementById('msg');
         msgDiv.innerText = "❌ 通信エラーが発生しました";
         msgDiv.style.color = "red";
         
+        // エラー時の待ち時間も少し短縮（1500ms → 1000ms）
         setTimeout(() => {
           resumeCamera(msgDiv, "❌ 通信エラーが発生しました");
-        }, 1500);
+        }, 1000);
       });
     }
 
-    // ★ カメラ再開処理をまとめた関数
     function resumeCamera(msgDiv, currentMsg) {
       if (msgDiv.innerText === currentMsg) {
         msgDiv.innerText = "次のQRをかざしてください";
         msgDiv.style.color = "#333";
       }
-      isProcessing = false; // ロック解除
+      isProcessing = false; 
       document.getElementById('reader').classList.remove('paused');
-      if (html5QrCode && html5QrCode.getState() === 3) { // PAUSED状態なら再開
+      if (html5QrCode && html5QrCode.getState() === 3) { 
         html5QrCode.resume();
       }
     }
