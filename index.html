@@ -15,6 +15,8 @@
     .btn-univ { background: #28a745; }
     .btn-outside { background: #fd7e14; }
     .btn-retry { background: #6c757d; color: white; padding: 10px 20px; border-radius: 8px; border: none; margin-top: 15px; cursor: pointer; }
+    /* 読み取り停止中の見た目を少し暗くするクラス */
+    .paused { opacity: 0.6; pointer-events: none; }
   </style>
 </head>
 <body>
@@ -32,12 +34,15 @@
   </div>
 
   <script>
-    // あなたのGAS URL
+    // ▼ あなたのGAS URLに変更してください ▼
     const GAS_URL = "https://script.google.com/macros/s/AKfycbzgGjGsR7_lT48L5oQsWnly3BS0iIgL8jElHTmmGO7MrgVAIph4EmUT4EM_tS_hT2rpDg/exec";
     
     let html5QrCode = null;
     let selectedMode = "";
     let recentlyScanned = []; 
+    
+    // ★通信中（ロック状態）を判定するフラグ
+    let isProcessing = false; 
     
     // GPS監視用の変数
     let watchId = null;
@@ -58,15 +63,12 @@
       if (mode === 'univ') {
         document.getElementById('msg').innerText = "📍 位置情報を確認中...";
         
-        // ▼ 変更点：GPSを裏側で「常に」監視し続ける ▼
         watchId = navigator.geolocation.watchPosition(
           (pos) => {
-            // 常に最新の座標をアップデート
             latestLat = pos.coords.latitude;
             latestLng = pos.coords.longitude;
             const dist = getDistance(latestLat, latestLng, UNIV_LAT, UNIV_LNG);
 
-            // まだカメラが起動していない（初回）の場合のみチェックして起動
             if (!isCameraStarted) {
               if (dist <= ALLOWED_RADIUS) {
                 isCameraStarted = true;
@@ -105,12 +107,12 @@
     }
 
     function resetPage() {
-      // 監視もストップする
       if (watchId !== null) {
         navigator.geolocation.clearWatch(watchId);
         watchId = null;
       }
       isCameraStarted = false;
+      isProcessing = false; // ロック解除
 
       if (html5QrCode && html5QrCode.isScanning) {
         html5QrCode.stop().then(finalizeReset).catch(finalizeReset);
@@ -122,6 +124,7 @@
     function finalizeReset() {
       document.getElementById('scan-container').style.display = 'none';
       document.getElementById('setup').style.display = 'block';
+      document.getElementById('reader').classList.remove('paused');
       document.getElementById('msg').innerText = "カメラ準備中...";
       document.getElementById('msg').style.color = "#333";
       selectedMode = "";
@@ -129,26 +132,33 @@
     }
 
     function onScanSuccess(decodedText) {
+      // ★ ロック中（通信中）ならスキャンを無視
+      if (isProcessing) return; 
+
       if (recentlyScanned.includes(decodedText)) return;
 
-      // ▼ 変更点：スキャンした瞬間に「最新の監視データ」を見て、持ち出されていないか判定 ▼
       if (selectedMode === 'univ' && latestLat !== null) {
         const dist = getDistance(latestLat, latestLng, UNIV_LAT, UNIV_LNG);
         if (dist > ALLOWED_RADIUS) {
-          // 範囲外なら送信せずにエラー表示！
           const msgDiv = document.getElementById('msg');
           msgDiv.innerText = `❌ 持ち出しを検知しました (${Math.round(dist)}m)`;
           msgDiv.style.color = "red";
           
-          // 2秒後に元の表示に戻す
           setTimeout(() => {
             if (msgDiv.innerText.includes("持ち出し")) {
               msgDiv.innerText = "次のQRをかざしてください";
               msgDiv.style.color = "#333";
             }
           }, 2000);
-          return; // ここで処理を止める（GASには送らない）
+          return; 
         }
+      }
+
+      // ★ 通信開始：フラグをONにし、カメラを一時停止
+      isProcessing = true;
+      if (html5QrCode && html5QrCode.getState() === 2) {
+        html5QrCode.pause(); 
+        document.getElementById('reader').classList.add('paused'); // 画面を少し暗くする
       }
 
       recentlyScanned.push(decodedText);
@@ -182,11 +192,9 @@
           msgDiv.style.color = "#28a745"; 
         }
 
+        // 1秒後に次のスキャンを許可
         setTimeout(() => {
-          if (msgDiv.innerText === res) {
-            msgDiv.innerText = "次のQRをかざしてください";
-            msgDiv.style.color = "#333";
-          }
+          resumeCamera(msgDiv, res);
         }, 1000);
       })
       .catch(err => {
@@ -195,12 +203,22 @@
         msgDiv.style.color = "red";
         
         setTimeout(() => {
-          if (msgDiv.innerText.includes("エラー")) {
-            msgDiv.innerText = "次のQRをかざしてください";
-            msgDiv.style.color = "#333";
-          }
-        }, 1000);
+          resumeCamera(msgDiv, "❌ 通信エラーが発生しました");
+        }, 1500);
       });
+    }
+
+    // ★ カメラ再開処理をまとめた関数
+    function resumeCamera(msgDiv, currentMsg) {
+      if (msgDiv.innerText === currentMsg) {
+        msgDiv.innerText = "次のQRをかざしてください";
+        msgDiv.style.color = "#333";
+      }
+      isProcessing = false; // ロック解除
+      document.getElementById('reader').classList.remove('paused');
+      if (html5QrCode && html5QrCode.getState() === 3) { // PAUSED状態なら再開
+        html5QrCode.resume();
+      }
     }
 
     function getDistance(lat1, lng1, lat2, lng2) {
