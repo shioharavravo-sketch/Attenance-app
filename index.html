@@ -15,7 +15,6 @@
     .btn-univ { background: #28a745; }
     .btn-outside { background: #fd7e14; }
     .btn-retry { background: #6c757d; color: white; padding: 10px 20px; border-radius: 8px; border: none; margin-top: 15px; cursor: pointer; }
-    /* 読み取り停止中の見た目を少し暗くするクラス */
     .paused { opacity: 0.6; pointer-events: none; }
   </style>
 </head>
@@ -24,7 +23,7 @@
   
   <div id="setup" class="btn-container">
     <button class="btn btn-univ" onclick="selectMode('univ')">🏫 大学内</button>
-    <button class="btn btn-outside" onclick="selectMode('outside')">🏃 大学外</button>
+    <button class="btn btn-outside" onclick="selectMode('outside')">🏃 大学外（位置情報を記録）</button>
   </div>
 
   <div id="scan-container" style="display:none;">
@@ -34,42 +33,40 @@
   </div>
 
   <script>
-    // ▼ あなたのGAS URLに変更してください ▼
+    // ▼ あなたのGAS URL ▼
     const GAS_URL = "https://script.google.com/macros/s/AKfycbzgGjGsR7_lT48L5oQsWnly3BS0iIgL8jElHTmmGO7MrgVAIph4EmUT4EM_tS_hT2rpDg/exec";
     
     let html5QrCode = null;
     let selectedMode = "";
     let recentlyScanned = []; 
-    
-    // ★通信中（ロック状態）を判定するフラグ
     let isProcessing = false; 
     
-    // GPS監視用の変数
     let watchId = null;
-    let latestLat = null;
-    let latestLng = null;
+    let latestLat = null; // 常に最新の緯度を保持
+    let latestLng = null; // 常に最新の経度を保持
     let isCameraStarted = false;
     
-    // 大学の座標設定
     const UNIV_LAT = 34.743429; 
     const UNIV_LNG = 137.388910; 
-    const ALLOWED_RADIUS = 500;
+    const ALLOWED_RADIUS = 50; // 大学内の判定半径（50m）
 
+    // ① カメラ開始と同時に、モードを問わず位置情報の監視（watchPosition）をスタートする
     function selectMode(mode) {
       selectedMode = mode;
       document.getElementById('setup').style.display = 'none';
       document.getElementById('scan-container').style.display = 'block';
       
-      if (mode === 'univ') {
-        document.getElementById('msg').innerText = "📍 位置情報を確認中...";
-        
-        watchId = navigator.geolocation.watchPosition(
-          (pos) => {
-            latestLat = pos.coords.latitude;
-            latestLng = pos.coords.longitude;
-            const dist = getDistance(latestLat, latestLng, UNIV_LAT, UNIV_LNG);
-
-            if (!isCameraStarted) {
+      document.getElementById('msg').innerText = "📍 位置情報を確認中...";
+      
+      watchId = navigator.geolocation.watchPosition(
+        (pos) => {
+          latestLat = pos.coords.latitude;
+          latestLng = pos.coords.longitude;
+          
+          if (!isCameraStarted) {
+            if (mode === 'univ') {
+              // 大学内モード：距離判定をする
+              const dist = getDistance(latestLat, latestLng, UNIV_LAT, UNIV_LNG);
               if (dist <= ALLOWED_RADIUS) {
                 isCameraStarted = true;
                 startCamera(); 
@@ -77,25 +74,25 @@
                 document.getElementById('msg').innerText = `❌ 範囲外です (${Math.round(dist)}m)`;
                 document.getElementById('msg').style.color = "red";
               }
+            } else if (mode === 'outside') {
+              // 学外モード：距離判定なしですぐにカメラ起動（ただし現在地は取得し続ける）
+              isCameraStarted = true;
+              startCamera();
             }
-          },
-          () => { 
-            if (!isCameraStarted) {
-              document.getElementById('msg').innerText = "❌ 位置情報を許可してください";
-              document.getElementById('msg').style.color = "red";
-            }
-          },
-          { enableHighAccuracy: true, maximumAge: 5000, timeout: 5000 }
-        );
-      } else {
-        isCameraStarted = true;
-        startCamera(); 
-      }
+          }
+        },
+        () => { 
+          if (!isCameraStarted) {
+            document.getElementById('msg').innerText = "❌ 位置情報を許可してください";
+            document.getElementById('msg').style.color = "red";
+          }
+        },
+        { enableHighAccuracy: true, maximumAge: 5000, timeout: 5000 }
+      );
     }
 
     function startCamera() {
       html5QrCode = new Html5Qrcode("reader");
-      // 【変更点1】fpsを10から30に上げて、QRの認識速度をアップ
       html5QrCode.start({ facingMode: "environment" }, { fps: 30, qrbox: 250 }, onScanSuccess)
         .then(() => { 
           document.getElementById('msg').innerText = "QRをかざしてください";
@@ -133,11 +130,10 @@
     }
 
     function onScanSuccess(decodedText) {
-      // ロック中ならスキャンを無視（安全対策キープ）
       if (isProcessing) return; 
-
       if (recentlyScanned.includes(decodedText)) return;
 
+      // 大学内モードの時は、スキャン時にも「持ち出し」をしていないか念のためチェック
       if (selectedMode === 'univ' && latestLat !== null) {
         const dist = getDistance(latestLat, latestLng, UNIV_LAT, UNIV_LNG);
         if (dist > ALLOWED_RADIUS) {
@@ -155,7 +151,6 @@
         }
       }
 
-      // 通信開始：フラグをONにし、カメラを一時停止
       isProcessing = true;
       if (html5QrCode && html5QrCode.getState() === 2) {
         html5QrCode.pause(); 
@@ -174,11 +169,19 @@
       sendToGasInBackground(decodedText);
     }
 
+    // ② GASにデータを送るとき、最新の「緯度（lat）」と「経度（lng）」も一緒に送信する
     function sendToGasInBackground(decodedText) {
+      const payload = {
+        qrData: decodedText,
+        mode: selectedMode,
+        lat: latestLat, // 👈 追加
+        lng: latestLng  // 👈 追加
+      };
+
       fetch(GAS_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'text/plain' },
-        body: JSON.stringify({ qrData: decodedText, mode: selectedMode })
+        body: JSON.stringify(payload)
       })
       .then(response => response.text())
       .then(res => {
@@ -193,7 +196,6 @@
           msgDiv.style.color = "#28a745"; 
         }
 
-        // 【変更点2】結果表示後の待ち時間を1000msから300msに短縮し、テンポアップ！
         setTimeout(() => {
           resumeCamera(msgDiv, res);
         }, 300);
@@ -203,7 +205,6 @@
         msgDiv.innerText = "❌ 通信エラーが発生しました";
         msgDiv.style.color = "red";
         
-        // エラー時の待ち時間も少し短縮（1500ms → 1000ms）
         setTimeout(() => {
           resumeCamera(msgDiv, "❌ 通信エラーが発生しました");
         }, 1000);
